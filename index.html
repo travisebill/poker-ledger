@@ -903,6 +903,21 @@
         }
     </script>
 
+
+        // PWA shortcut: ?action=add → 直接開啟「新增戰績」modal
+        (function () {
+            try {
+                const p = new URLSearchParams(window.location.search);
+                if (p.get('action') === 'add') {
+                    window.addEventListener('load', function () {
+                        setTimeout(function () {
+                            if (typeof openRecordModal === 'function') openRecordModal();
+                        }, 400);
+                    });
+                }
+            } catch (e) {}
+        })();
+    </script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
