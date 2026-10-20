@@ -904,17 +904,19 @@
     </script>
 
 
+    <script>
         // PWA shortcut: ?action=add → 直接開啟「新增戰績」modal
         (function () {
             try {
                 const p = new URLSearchParams(window.location.search);
-                if (p.get('action') === 'add') {
-                    window.addEventListener('load', function () {
-                        setTimeout(function () {
-                            if (typeof openRecordModal === 'function') openRecordModal();
-                        }, 400);
-                    });
-                }
+                if (p.get('action') !== 'add') return;
+                const go = function () {
+                    setTimeout(function () {
+                        if (typeof openRecordModal === 'function') openRecordModal();
+                    }, 300);
+                };
+                if (document.readyState === 'complete') go();
+                else window.addEventListener('load', go);
             } catch (e) {}
         })();
     </script>
