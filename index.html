@@ -128,8 +128,7 @@
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
         }
     </style>
-
-    <!-- PWA -->
+<!-- PWA -->
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#0d1b14">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -198,7 +197,10 @@
 
         <!-- 主要操作與功能選單按鈕列 (改為網格整齊排列，大小一致) -->
         <div class="glass-panel rounded-2xl p-5 shadow-xl space-y-3">
-            <div class="text-xs text-emerald-400 font-medium mb-2"><i class="fa-solid fa-toolbox text-yellow-400 mr-1.5"></i> 核心功能與資料管理區</div>
+            <div class="text-xs text-emerald-400 font-medium mb-2 flex items-center justify-between">
+                <span><i class="fa-solid fa-toolbox text-yellow-400 mr-1.5"></i> 核心功能與資料管理區</span>
+                <span id="autoSaveStatus" class="text-emerald-400 text-[11px] bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-800/60"><i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> 資料已自動儲存於本機</span>
+            </div>
             <div id="actionButtonsRow" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                 <button onclick="openRecordModal()" class="btn-poker btn-gold px-3 py-3 text-xs md:text-sm shadow-lg flex items-center justify-center space-x-1.5 truncate">
                     <i class="fa-solid fa-circle-plus shrink-0"></i>
@@ -220,13 +222,13 @@
                     <i class="fa-solid fa-gamepad shrink-0"></i>
                     <span class="truncate">管理遊戲項目</span>
                 </button>
-                <button onclick="exportData()" class="btn-poker btn-dark px-3 py-3 text-xs md:text-sm shadow-lg flex items-center justify-center space-x-1.5 truncate">
-                    <i class="fa-solid fa-download shrink-0"></i>
-                    <span class="truncate">匯出備份</span>
+                <button onclick="exportData()" class="btn-poker btn-dark px-3 py-3 text-xs md:text-sm shadow-lg flex items-center justify-center space-x-1.5 truncate" title="下載完整資料庫檔案到手機或電腦">
+                    <i class="fa-solid fa-download text-yellow-400 shrink-0"></i>
+                    <span class="truncate">下載備份檔案</span>
                 </button>
-                <label class="btn-poker btn-dark px-3 py-3 text-xs md:text-sm shadow-lg flex items-center justify-center space-x-1.5 cursor-pointer truncate">
-                    <i class="fa-solid fa-upload shrink-0"></i>
-                    <span class="truncate">匯入還原</span>
+                <label class="btn-poker btn-dark px-3 py-3 text-xs md:text-sm shadow-lg flex items-center justify-center space-x-1.5 cursor-pointer truncate" title="讀取先前下載的備份檔案">
+                    <i class="fa-solid fa-upload text-blue-400 shrink-0"></i>
+                    <span class="truncate">讀取備份檔案</span>
                     <input type="file" id="importFile" accept=".json" onchange="importData(event)" class="hidden">
                 </label>
             </div>
@@ -401,9 +403,9 @@
 
     <script>
         const DEFAULT_GAMES = [
-            '德州撲克現金桌',
-            '德州撲克錦標賽',
-            '十三張'
+            '線上德州撲克',
+            '現場德州',
+            '球版'
         ];
 
         let gamesList = JSON.parse(localStorage.getItem('poker_games')) || DEFAULT_GAMES;
@@ -412,6 +414,9 @@
         let profitChartInstance = null;
 
         window.onload = function() {
+            // 嘗試從進階永續儲存讀取
+            loadPersistentData();
+            seedIndexedDBFromLocalStorage();
             initDateInput();
             renderGameFilterButtons();
             updateGameOptions();
@@ -854,24 +859,125 @@
         }
 
         function saveDataToLocalStorage() {
-            localStorage.setItem('poker_games', JSON.stringify(gamesList));
-            localStorage.setItem('poker_records', JSON.stringify(recordsList));
+            try {
+                localStorage.setItem('poker_games', JSON.stringify(gamesList));
+                localStorage.setItem('poker_records', JSON.stringify(recordsList));
+                // 同時即時寫入 IndexedDB 做為永久本機儲存
+                saveToIndexedDB(gamesList, recordsList);
+                
+                // 顯示即時更新狀態提示
+                const statusEl = document.getElementById('autoSaveStatus');
+                if (statusEl) {
+                    statusEl.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> 已自動更新儲存';
+                    setTimeout(() => {
+                        statusEl.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> 資料已自動儲存於本機';
+                    }, 2000);
+                }
+            } catch (e) {
+                console.error("儲存失敗", e);
+            }
+        }
+
+        // 使用 IndexedDB 作為更安全、不易被瀏覽器自動清除的本機永續資料庫
+        function saveToIndexedDB(games, records) {
+            const request = indexedDB.open('PokerLedgerDB', 1);
+            request.onupgradeneeded = function(e) {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('store')) {
+                    db.createObjectStore('store');
+                }
+            };
+            request.onsuccess = function(e) {
+                const db = e.target.result;
+                const transaction = db.transaction('store', 'readwrite');
+                const store = transaction.objectStore('store');
+                store.put(games, 'games');
+                store.put(records, 'records');
+            };
+        }
+
+        // 升級相容：若 IndexedDB 尚無資料但 localStorage 有，將 localStorage 的內容
+        // 寫入 IndexedDB，確保雙層備援從第一次載入就生效。
+        function seedIndexedDBFromLocalStorage() {
+            try {
+                const request = indexedDB.open('PokerLedgerDB', 1);
+                request.onupgradeneeded = function(e) {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('store')) {
+                        db.createObjectStore('store');
+                    }
+                };
+                request.onsuccess = function(e) {
+                    const db = e.target.result;
+                    const tx = db.transaction('store', 'readwrite');
+                    const store = tx.objectStore('store');
+                    const getGames = store.get('games');
+                    getGames.onsuccess = function() {
+                        if (getGames.result === undefined && Array.isArray(gamesList)) {
+                            store.put(gamesList, 'games');
+                        }
+                    };
+                    const getRecords = store.get('records');
+                    getRecords.onsuccess = function() {
+                        if (getRecords.result === undefined && Array.isArray(recordsList)) {
+                            store.put(recordsList, 'records');
+                        }
+                    };
+                };
+            } catch (e) {
+                console.warn('[persist] seed failed', e);
+            }
+        }
+
+        function loadPersistentData() {
+            const request = indexedDB.open('PokerLedgerDB', 1);
+            request.onupgradeneeded = function(e) {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('store')) {
+                    db.createObjectStore('store');
+                }
+            };
+            request.onsuccess = function(e) {
+                const db = e.target.result;
+                const transaction = db.transaction('store', 'readonly');
+                const store = transaction.objectStore('store');
+                
+                const getGames = store.get('games');
+                const getRecords = store.get('records');
+
+                getGames.onsuccess = function() {
+                    if (getGames.result && Array.isArray(getGames.result)) {
+                        gamesList = getGames.result;
+                        renderGameFilterButtons();
+                        updateGameOptions();
+                        updateDashboardStats();
+                    }
+                };
+
+                getRecords.onsuccess = function() {
+                    if (getRecords.result && Array.isArray(getRecords.result)) {
+                        recordsList = getRecords.result;
+                        updateDashboardStats();
+                    }
+                };
+            };
         }
 
         function exportData() {
             const data = {
                 games: gamesList,
                 records: recordsList,
-                version: '1.6',
+                version: '1.8',
                 exportDate: new Date().toISOString()
             };
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `poker_ledger_dark_backup_${new Date().toISOString().slice(0, 10)}.json`;
+            a.download = `越記越多的記帳本_備份_${new Date().toISOString().slice(0, 10)}.json`;
             a.click();
             URL.revokeObjectURL(url);
+            showMessage('下載成功', '備份檔案已成功下載到你的手機或電腦中！', 'success');
         }
 
         function importData(event) {
@@ -893,7 +999,7 @@
                     renderGameFilterButtons();
                     updateGameOptions();
                     updateDashboardStats();
-                    showMessage('成功', '資料已成功匯入還原！', 'success');
+                    showMessage('成功', '備份檔案已成功讀取還原！', 'success');
                 } catch (err) {
                     showMessage('錯誤', '檔案格式錯誤，無法解析備份檔案！', 'error');
                 }
@@ -902,9 +1008,7 @@
             event.target.value = '';
         }
     </script>
-
-
-    <script>
+<script>
         // PWA shortcut: ?action=add → 直接開啟「新增戰績」modal
         (function () {
             try {

@@ -4,7 +4,7 @@
  *   - 導航請求：network-first → 失敗回退 cache 的 index.html
  *   - 其他同源 GET：stale-while-revalidate
  */
-const CACHE = 'poker-ledger-v2';
+const CACHE = 'poker-ledger-v3';
 
 const PRECACHE = [
   './',
